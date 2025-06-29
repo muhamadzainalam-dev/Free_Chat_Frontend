@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -12,72 +12,113 @@ export default function Page() {
   const [message, setMessage] = useState("");
   const [userName, setUserName] = useState("");
   const [socket, setSocket] = useState(null);
+  const [namePrompted, setNamePrompted] = useState(false);
+
+  const messagesEndRef = useRef(null);
+  const notificationSoundRef = useRef(null);
+
+  // Auto-scroll to bottom
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   useEffect(() => {
-    const newSocket = io("http://192.168.100.22:8000");
+    const newSocket = io("https://free-chat-backend-daga.onrender.com", {
+      transports: ["websocket"],
+      reconnectionAttempts: 5,
+    });
+
     setSocket(newSocket);
-
-    const notificationSound = new Audio("/sounds/notification.MP3");
-
-    if ("Notification" in window && Notification.permission !== "granted") {
-      Notification.requestPermission();
-    }
+    notificationSoundRef.current = new Audio("/sounds/notification.mp3");
 
     newSocket.on("connect", () => {
-      const name = prompt("Enter Your Name To Join");
-      if (name) {
-        setUserName(name);
-        newSocket.emit("new-user-joined", name);
-      }
+      console.log("Connected to server");
     });
 
     newSocket.on("user-joined", (name) => {
-      setMessages((prevMessages) => [
-        ...prevMessages,
+      setMessages((prev) => [
+        ...prev,
         { user: "System", message: `${name} has joined the chat!` },
       ]);
     });
 
     newSocket.on("receive", (data) => {
-      setMessages((prevMessages) => [
-        ...prevMessages,
+      setMessages((prev) => [
+        ...prev,
         { user: data.name, message: data.message },
       ]);
 
-      notificationSound.play();
+      if (notificationSoundRef.current) {
+        notificationSoundRef.current.play();
+      }
 
-      if (Notification.permission === "granted") {
+      if ("Notification" in window && Notification.permission === "granted") {
         new Notification(data.name, { body: data.message });
       }
     });
 
     newSocket.on("user-left", (name) => {
-      setMessages((prevMessages) => [
-        ...prevMessages,
+      setMessages((prev) => [
+        ...prev,
         { user: "System", message: `${name} has left the chat.` },
       ]);
     });
 
-    newSocket.on("disconnect", () => {
-      console.log("Socket.IO connection closed");
-    });
-
-    return () => newSocket.close();
+    return () => newSocket.disconnect();
   }, []);
+
+  // Request notification permission once
+  useEffect(() => {
+    if ("Notification" in window && Notification.permission !== "granted") {
+      Notification.requestPermission();
+    }
+  }, []);
+
+  // Emit new user join when name is entered
+  useEffect(() => {
+    if (socket && userName) {
+      socket.emit("new-user-joined", userName);
+    }
+  }, [socket, userName]);
 
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (message.trim() && socket) {
       socket.emit("send", message);
-
-      setMessages((prevMessages) => [
-        ...prevMessages,
-        { user: userName, message: message },
-      ]);
-
+      setMessages((prev) => [...prev, { user: userName, message }]);
       setMessage("");
     }
   };
+
+  const handleNameSubmit = (e) => {
+    e.preventDefault();
+    if (userName.trim()) {
+      setNamePrompted(true);
+    }
+  };
+
+  if (!namePrompted) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-gray-900 text-gray-100 p-4">
+        <form onSubmit={handleNameSubmit} className="space-y-4">
+          <h1 className="text-2xl font-bold">Enter Your Name to Join</h1>
+          <Input
+            type="text"
+            placeholder="Your name"
+            value={userName}
+            onChange={(e) => setUserName(e.target.value)}
+            className="bg-gray-700 border-gray-600 text-gray-100"
+          />
+          <Button
+            type="submit"
+            className="bg-blue-600 hover:bg-blue-700 focus:ring-blue-500 w-full"
+          >
+            Join Chat
+          </Button>
+        </form>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen bg-gray-900 text-gray-100">
@@ -88,7 +129,7 @@ export default function Page() {
         </div>
       </header>
 
-      <ScrollArea className="flex-1 p-4">
+      <ScrollArea className="flex-1 p-4 overflow-y-auto">
         <div className="space-y-4 max-w-2xl mx-auto">
           {messages.map((msg, index) => (
             <div
@@ -116,6 +157,7 @@ export default function Page() {
               </div>
             </div>
           ))}
+          <div ref={messagesEndRef} />
         </div>
       </ScrollArea>
 
